@@ -1,0 +1,21 @@
+# Core Trading + Data Stack
+pandas
+numpy
+ccxt
+ib_insync
+
+# Strategy + Backtesting
+backtrader
+ta  # Technical Analysis indicators
+
+# Machine Learning
+scikit-learn
+xgboost
+joblib
+
+# Dashboarding
+streamlit
+plotly
+
+# Logging + Utils
+python-dotenv

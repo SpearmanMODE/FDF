@@ -1,0 +1,13 @@
+{"timestamp": "2025-08-04T01:18:51.811035", "symbol": "ETH", "action": "BUY", "price": 2851.23, "position": null}
+{"timestamp": "2025-08-04T01:33:06.550071", "symbol": "ETH", "action": "BUY", "price": 2851.23, "position": null}
+{"timestamp": "2025-08-04T01:39:21.251581", "symbol": "ETH", "action": "BUY", "price": 2851.23, "position": null}
+{"timestamp": "2025-08-04T01:42:14.911450", "symbol": "ETH", "action": "BUY", "price": 2851.23, "position": null}
+{"timestamp": "2025-08-04T01:42:16.924396", "symbol": "ETH", "action": "BUY", "price": 3546.99, "position": "long"}
+{"timestamp": "2025-08-04T02:00:33.300665", "symbol": "ETH", "action": "BUY", "price": 2851.23, "position": "long", "pnl": null}
+{"timestamp": "2025-08-04T02:10:43.066092", "symbol": "ETH", "action": "BUY", "price": 2851.23, "position": "long", "pnl": null}
+{"timestamp": "2025-08-04T02:10:45.067566", "symbol": "ETH", "action": "SELL", "price": 3528.77, "position": "flat", "pnl": 677.54}
+{"timestamp": "2025-08-04T03:17:37.226117", "symbol": "ETH", "action": "BUY", "price": 2851.23, "position": "long", "pnl": null}
+{"timestamp": "2025-08-04T03:17:38.763200", "symbol": "ETH", "action": "SELL", "price": 3563.08, "position": "flat", "pnl": 711.85}
+{"timestamp": "2025-08-04T03:23:28.183834", "symbol": "ETH", "action": "BUY", "price": 2851.23, "position": "long", "pnl": null}
+{"timestamp": "2025-08-04T03:23:30.503284", "symbol": "ETH", "action": "SELL", "price": 3567.34, "position": "flat", "pnl": 716.11}
+{"timestamp": "2025-08-04T03:57:16.594953", "symbol": "ETH", "action": "BUY", "price": 2851.23, "position": "long", "pnl": null}
