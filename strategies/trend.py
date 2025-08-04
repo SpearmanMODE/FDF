@@ -7,6 +7,9 @@ from datetime import datetime
 from collections import deque
 from utils.telegram import send_telegram_alert
 from allocator.fund_allocator import allocator
+from utils.metrics import update_performance_file  # 👈 import at top
+from risk.risk_manager import RiskManager
+risk = RiskManager()
 
 class TrendPod:
     def __init__(self, ib, symbol='ETH', exchange='PAXOS', currency='USD'):
@@ -33,28 +36,53 @@ class TrendPod:
         return price
 
     def log_trade(self, action, price):
+        from allocator.fund_allocator import allocator
+        from utils.metrics import update_performance_file
+        from risk.risk_manager import RiskManager
+
+        risk = RiskManager()
         pnl = None
 
         if action == 'BUY':
+            size = allocator.get_position_size(self.name, price)
+            if size * price > risk.max_position_size:
+                print(f"[{self.name}] BUY blocked: position size too large (${size * price:.2f})")
+                return
             self.entry_price = price
             self.position = 'long'
+
         elif action == 'SELL' and hasattr(self, 'entry_price'):
             pnl = round(price - self.entry_price, 2)
+
+            trade_meta = {
+                "symbol": self.symbol,
+                "price": price,
+                "pnl": pnl
+            }
+
+            if not risk.check_trade_risk(trade_meta):
+                print(f"[{self.name}] Trade blocked by RiskManager (trade loss).")
+                return
+
+            if not risk.check_daily_loss(self.name):
+                print(f"[{self.name}] Daily loss exceeded. No trades allowed.")
+                return
+
             self.position = 'flat'
             allocator.update_performance(self.name, pnl)
+            update_performance_file(self.name.lower(), pnl)
             del self.entry_price
 
+        size = allocator.get_position_size(self.name, price)
         log = {
             'timestamp': datetime.utcnow().isoformat(),
             'symbol': self.symbol,
             'action': action,
             'price': round(price, 2),
             'position': self.position,
-            'pnl': pnl
+            'pnl': pnl,
+            'size': size
         }
-
-        size = allocator.get_position_size(self.name, price)
-        log['size'] = size
 
         msg = f"[{self.name.upper()}] {action} @ {price:.2f} | Size: {size}"
         if pnl is not None:
