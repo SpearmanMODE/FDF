@@ -1,8 +1,10 @@
 import os
 import json
 import random
-from datetime import datetime
+import numpy as np
 from collections import deque
+from datetime import datetime
+
 from utils.telegram import send_telegram_alert
 from allocator.fund_allocator import allocator
 from utils.metrics import update_performance_file
@@ -10,26 +12,39 @@ from risk.risk_manager import RiskManager
 from utils.order_executor import execute_order
 from config import LIVE_MODE
 
-class ScalperPod:
-    def __init__(self, ib, symbol='ETH'):
+class MeanRevertPod:
+    def __init__(self, ib, symbol='ETH', window=20, threshold=1.5):
         self.ib = ib
         self.symbol = symbol
         self.logs = []
-        self.prices = deque(maxlen=5)
+        self.prices = deque(maxlen=window)
         self.position = None
-        self.name = "ScalperPod"
+        self.name = "MeanRevertPod"
         self.risk = RiskManager()
+        self.threshold = threshold
+        self.entry_price = None
 
     def fetch_price(self):
         from exchanges.kraken import get_price_kraken
+        from exchanges.coinbase import get_price_coinbase
+
         price = get_price_kraken(symbol='ETHUSD')
+        if price is None:
+            price = get_price_coinbase(symbol='ETH-USD')
         return price if price else 2850.0 + random.uniform(-5, 5)
+
+    def compute_zscore(self):
+        arr = np.array(self.prices)
+        mean = np.mean(arr)
+        std = np.std(arr)
+        latest = arr[-1]
+        return (latest - mean) / std if std > 0 else 0.0
 
     def log_trade(self, action, price):
         pnl = None
+        size = allocator.get_position_size(self.name, price)
 
         if action == 'BUY':
-            size = allocator.get_position_size(self.name, price)
             if size * price > self.risk.max_position_size:
                 print(f"[{self.name}] BUY blocked: size too large.")
                 return
@@ -38,7 +53,7 @@ class ScalperPod:
             self.entry_price = price
             self.position = 'long'
 
-        elif action == 'SELL' and hasattr(self, 'entry_price'):
+        elif action == 'SELL' and self.entry_price:
             pnl = round(price - self.entry_price, 2)
             trade_meta = {"symbol": self.symbol, "price": price, "pnl": pnl}
 
@@ -49,15 +64,13 @@ class ScalperPod:
                 print(f"[{self.name}] Daily loss exceeded.")
                 return
 
-            size = allocator.get_position_size(self.name, price)
             execute_order(self.ib, self.symbol, "SELL", size, price=price, live=LIVE_MODE)
 
             self.position = 'flat'
             allocator.update_performance(self.name, pnl)
             update_performance_file(self.name.lower(), pnl)
-            del self.entry_price
+            self.entry_price = None
 
-        size = allocator.get_position_size(self.name, price)
         log = {
             'timestamp': datetime.utcnow().isoformat(),
             'symbol': self.symbol,
@@ -68,32 +81,31 @@ class ScalperPod:
             'size': size
         }
 
-        msg = f"[{self.name.upper()}] {action} @ {price:.2f} | Size: {size}"
+        msg = f"[{self.name}] {action} @ {price:.2f} | Size: {size}"
         if pnl is not None:
             msg += f" | PnL: {pnl:.2f}"
         print(msg)
         send_telegram_alert(msg)
 
         self.logs.append(log)
-        log_path = os.path.join("pod_logs", "scalperpod.log")
-        with open(log_path, "a") as f:
+        with open(f"pod_logs/meanrevertpod.log", "a") as f:
             f.write(json.dumps(log) + "\n")
 
     def run_once(self):
         price = self.fetch_price()
         if price is None:
+            print(f"[{self.name}] No price available.")
             return
 
         self.prices.append(price)
-        if len(self.prices) < 3:
+        if len(self.prices) < self.prices.maxlen:
+            print(f"[{self.name}] Collecting prices: {len(self.prices)}/{self.prices.maxlen}")
             return
 
-        change = (self.prices[-1] - self.prices[-2]) / self.prices[-2]
+        z = self.compute_zscore()
+        print(f"[{self.name}] Z-score: {z:.2f} | Price: {price:.2f}")
 
-        if self.position != 'long' and change > 0.002:
+        if self.position != 'long' and z <= -self.threshold:
             self.log_trade('BUY', price)
-        elif self.position == 'long' and change < -0.002:
+        elif self.position == 'long' and z >= 0:
             self.log_trade('SELL', price)
-
-
-

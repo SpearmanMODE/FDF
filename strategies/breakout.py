@@ -1,5 +1,3 @@
-# strategies/breakout.py
-
 import os
 import json
 import random
@@ -7,18 +5,21 @@ from datetime import datetime
 from collections import deque
 from utils.telegram import send_telegram_alert
 from allocator.fund_allocator import allocator
-from utils.metrics import update_performance_file  # at the top
+from utils.metrics import update_performance_file
 from risk.risk_manager import RiskManager
-risk = RiskManager()
+from utils.order_executor import execute_order
+from config import LIVE_MODE
 
 class BreakoutPod:
-    def __init__(self, symbol='ETH', lookback=5):
+    def __init__(self, ib, symbol='ETH', lookback=5):
+        self.ib = ib
         self.symbol = symbol
         self.lookback = lookback
         self.prices = deque(maxlen=lookback)
         self.position = None
         self.logs = []
         self.name = "BreakoutPod"
+        self.risk = RiskManager()
 
     def fetch_price(self):
         from exchanges.coinbase import get_price_coinbase
@@ -26,37 +27,31 @@ class BreakoutPod:
         return price if price else 2850.0 + random.uniform(-5, 5)
 
     def log_trade(self, action, price):
-        from allocator.fund_allocator import allocator
-        from utils.metrics import update_performance_file
-        from risk.risk_manager import RiskManager
-
-        risk = RiskManager()
         pnl = None
 
         if action == 'BUY':
             size = allocator.get_position_size(self.name, price)
-            if size * price > risk.max_position_size:
-                print(f"[{self.name}] BUY blocked: position size too large (${size * price:.2f})")
+            if size * price > self.risk.max_position_size:
+                print(f"[{self.name}] BUY blocked: size too large.")
                 return
+
+            execute_order(self.ib, self.symbol, "BUY", size, price=price, live=LIVE_MODE)
             self.entry_price = price
             self.position = 'long'
 
         elif action == 'SELL' and hasattr(self, 'entry_price'):
             pnl = round(price - self.entry_price, 2)
+            trade_meta = {"symbol": self.symbol, "price": price, "pnl": pnl}
 
-            trade_meta = {
-                "symbol": self.symbol,
-                "price": price,
-                "pnl": pnl
-            }
-
-            if not risk.check_trade_risk(trade_meta):
-                print(f"[{self.name}] Trade blocked by RiskManager (trade loss).")
+            if not self.risk.check_trade_risk(trade_meta):
+                print(f"[{self.name}] Trade blocked by RiskManager (loss).")
+                return
+            if not self.risk.check_daily_loss(self.name):
+                print(f"[{self.name}] Daily loss exceeded.")
                 return
 
-            if not risk.check_daily_loss(self.name):
-                print(f"[{self.name}] Daily loss exceeded. No trades allowed.")
-                return
+            size = allocator.get_position_size(self.name, price)
+            execute_order(self.ib, self.symbol, "SELL", size, price=price, live=LIVE_MODE)
 
             self.position = 'flat'
             allocator.update_performance(self.name, pnl)
@@ -91,16 +86,16 @@ class BreakoutPod:
             return
 
         self.prices.append(price)
-        if len(self.prices) < 10:
+        if len(self.prices) < self.lookback:
             return
 
         recent_high = max(self.prices)
         recent_low = min(self.prices)
-
-        breakout_level = recent_high * 1.01  # 1% above high
-        breakdown_level = recent_low * 0.99  # 1% below low
+        breakout_level = recent_high * 1.01
+        breakdown_level = recent_low * 0.99
 
         if self.position != 'long' and price > breakout_level:
             self.log_trade('BUY', price)
         elif self.position == 'long' and price < breakdown_level:
             self.log_trade('SELL', price)
+

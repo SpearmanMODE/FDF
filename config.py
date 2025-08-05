@@ -1,3 +1,6 @@
+import os
+
+LIVE_MODE = os.getenv("FDF_LIVE_MODE", "False") == "True"
 IBKR_CONFIG = {
     "host": "127.0.0.1",
     "port": 7497,

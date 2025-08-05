@@ -1,5 +1,3 @@
-# strategies/trend.py
-
 import os
 import json
 import random
@@ -7,9 +5,10 @@ from datetime import datetime
 from collections import deque
 from utils.telegram import send_telegram_alert
 from allocator.fund_allocator import allocator
-from utils.metrics import update_performance_file  # 👈 import at top
+from utils.metrics import update_performance_file
 from risk.risk_manager import RiskManager
-risk = RiskManager()
+from utils.order_executor import execute_order
+from config import LIVE_MODE
 
 class TrendPod:
     def __init__(self, ib, symbol='ETH', exchange='PAXOS', currency='USD'):
@@ -21,6 +20,7 @@ class TrendPod:
         self.prices = deque(maxlen=20)
         self.position = None
         self.name = "TrendPod"
+        self.risk = RiskManager()
 
     def fetch_price(self):
         from exchanges.kraken import get_price_kraken
@@ -30,43 +30,34 @@ class TrendPod:
         if price is None:
             print("[TrendPod] Kraken failed. Trying Coinbase...")
             price = get_price_coinbase(symbol='ETH-USD')
-        if price is None:
-            print("[TrendPod] All feeds down. Using fallback.")
-            return 2850.0 + random.uniform(-5, 5)
-        return price
+        return price if price else 2850.0 + random.uniform(-5, 5)
 
     def log_trade(self, action, price):
-        from allocator.fund_allocator import allocator
-        from utils.metrics import update_performance_file
-        from risk.risk_manager import RiskManager
-
-        risk = RiskManager()
         pnl = None
 
         if action == 'BUY':
             size = allocator.get_position_size(self.name, price)
-            if size * price > risk.max_position_size:
+            if size * price > self.risk.max_position_size:
                 print(f"[{self.name}] BUY blocked: position size too large (${size * price:.2f})")
                 return
+
+            execute_order(self.ib, self.symbol, "BUY", size, price=price, live=LIVE_MODE)
             self.entry_price = price
             self.position = 'long'
 
         elif action == 'SELL' and hasattr(self, 'entry_price'):
             pnl = round(price - self.entry_price, 2)
 
-            trade_meta = {
-                "symbol": self.symbol,
-                "price": price,
-                "pnl": pnl
-            }
-
-            if not risk.check_trade_risk(trade_meta):
-                print(f"[{self.name}] Trade blocked by RiskManager (trade loss).")
+            trade_meta = {"symbol": self.symbol, "price": price, "pnl": pnl}
+            if not self.risk.check_trade_risk(trade_meta):
+                print(f"[{self.name}] Trade blocked by RiskManager (loss).")
+                return
+            if not self.risk.check_daily_loss(self.name):
+                print(f"[{self.name}] Daily loss exceeded.")
                 return
 
-            if not risk.check_daily_loss(self.name):
-                print(f"[{self.name}] Daily loss exceeded. No trades allowed.")
-                return
+            size = allocator.get_position_size(self.name, price)
+            execute_order(self.ib, self.symbol, "SELL", size, price=price, live=LIVE_MODE)
 
             self.position = 'flat'
             allocator.update_performance(self.name, pnl)
@@ -111,6 +102,7 @@ class TrendPod:
             self.log_trade('BUY', price)
         elif self.position == 'long' and short_ma < long_ma:
             self.log_trade('SELL', price)
+
 
 
 
